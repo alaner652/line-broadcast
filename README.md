@@ -3,7 +3,7 @@
 把同一則通知（颱風休館、課程異動、活動提醒）逐一發給多位 LINE 好友，
 每位間隔幾秒模擬人手，附每位結果報告、一鍵補發、完整 log。
 
-裝在有登入 LINE 桌面版的 Windows / macOS 電腦上，操作者只要維護兩個記事本檔：
+裝在有登入 LINE 桌面版的 Windows 電腦上，操作者只要維護兩個記事本檔：
 
 ```
 recipients.txt   ← 一行一個客戶的 LINE 名稱
@@ -12,8 +12,8 @@ message.txt      ← 要發的內容
 
 然後雙擊 `windows\群發.cmd`。
 
-> **這不是 LINE 官方功能。** 它是用 GUI 自動化操作你自己的 LINE 桌面版（Windows 用 AutoHotkey，
-> macOS 用 Accessibility），沒有碰 LINE 伺服器、不需要帳號密碼。但用個人帳號做自動化違反
+> **這不是 LINE 官方功能。** 它是用 AutoHotkey 做 GUI 自動化操作你自己的 LINE 桌面版，
+> 沒有碰 LINE 伺服器、不需要帳號密碼。但用個人帳號做自動化違反
 > LINE 使用條款，帳號有被限制的風險——請只發客戶預期會收到的服務通知、保持預設間隔、單日不要超過 100 人。
 > 詳見 [docs/BUSINESS_PLAN.md](docs/BUSINESS_PLAN.md) 的風險段。
 
@@ -34,16 +34,15 @@ message.txt      ← 要發的內容
 
 發送期間不要碰鍵盤滑鼠。按 Ctrl+C 會發完目前這一位後停下。
 
-## macOS（開發 / 測試用）
+## 從指令列執行（開發用）
 
 ```bash
 npm install
-node bin/broadcast.js --to recipients.txt --check                      # 對照 LINE 列表，名字找不找得到（不發送）
-node bin/broadcast.js --to recipients.txt --message-file message.txt --dry-run
-node bin/broadcast.js --to recipients.txt --message-file message.txt --manual-first
+cp examples/recipients.example.txt recipients.txt
+cp examples/message.example.txt message.txt
+node bin/broadcast.js --to recipients.txt --message-file message.txt --dry-run       # 只預覽，任何平台都能跑
+node bin/broadcast.js --to recipients.txt --message-file message.txt --manual-first  # 實際發送，只支援 Windows
 ```
-
-需要「輔助使用」權限給終端機，以及 `brew install cliclick`。
 
 ## 檔案格式
 
@@ -64,22 +63,20 @@ node bin/broadcast.js --to recipients.txt --message-file message.txt --manual-fi
 
 這是最常見的失敗，先講清楚機制：
 
-| 平台 | 怎麼找人 | 找不到會怎樣 |
-|---|---|---|
-| Windows | 打開 LINE 搜尋框（Ctrl+Shift+F）→ 貼上名字 → Enter → 點第一筆 | **搜尋沒結果時，LINE 仍停在原本開著的聊天室，訊息會貼到那裡。** 這是目前最大的風險。 |
-| macOS | 讀側欄每一列的文字比對，點開後再讀聊天室標題驗證 | 找不到 / 標題不符 → 該位標記失敗、跳過，不會誤發 |
+| 怎麼找人 | 找不到會怎樣 |
+|---|---|
+| 打開 LINE 搜尋框（Ctrl+Shift+F）→ 貼上名字 → Enter → 點第一筆 | **搜尋沒結果時，LINE 仍停在原本開著的聊天室，訊息會貼到那裡。** 這是目前最大的風險。 |
 
 對策，由便宜到麻煩：
 
 1. **在 LINE 裡改顯示名稱。** 對每位客戶「更改顯示名稱」成一致好認的格式（例如 `客戶-王小明`），
    emoji、空白、長名字截斷問題全部消失，而且搜尋一定唯一。這是根本解，一次做完就好。
-2. **發送前先 `--check`**（macOS）：不打字不發送，逐一對照列表，把找不到的名字列出來。
-3. **新名單一律 `--manual-first`**：第一位人眼確認，等於免費驗證這台電腦的搜尋流程沒問題。
-4. **名字要唯一。** 「小明」會同時對到「王小明」「陳小明」；用全名或加前綴。
-5. **失敗的不用重跑全部。** 每次都有 `logs/broadcast-report-*.json`，加 `--resume 那個檔` 只補發失敗的；
+2. **新名單一律 `--manual-first`**：第一位人眼確認，等於免費驗證這台電腦的搜尋流程沒問題。
+3. **名字要唯一。** 「小明」會同時對到「王小明」「陳小明」；用全名或加前綴。
+4. **失敗的不用重跑全部。** 每次都有 `logs/broadcast-report-*.json`，加 `--resume 那個檔` 只補發失敗的；
    剩下兩三位手動發也比 50 位手動發快得多。
 
-工具**不用 OCR 找人**（讀取聊天列表靠 LINE 搜尋 / Accessibility 文字），所以沒有「辨識不出中文」的問題；
+工具**不用 OCR 找人**（找人靠 LINE 自己的搜尋），所以沒有「辨識不出中文」的問題；
 問題永遠是「名字打得跟 LINE 上顯示的不一樣」。
 
 ## 選項一覽
@@ -95,7 +92,7 @@ node bin/broadcast.js --help
 
 ## 已知限制 / 待辦
 
-- Windows 端還沒實機測過（開發在 macOS）；第一次部署要有人在旁邊
+- Windows 端還沒實機測過（開發機是 macOS，只能跑 dry-run）；第一次部署要有人在旁邊
 - Windows 無法確認開到的聊天室是否正確（見上表）；未來可加截圖 + Windows 內建 OCR 讀聊天室標題做驗證
 - LINE 桌面版改版可能讓座標 / 快捷鍵失效，需要跟著修
 - 尚未包成單一 exe

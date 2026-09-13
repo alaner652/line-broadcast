@@ -6,7 +6,6 @@
   "bin": { "line-broadcast": "./bin/broadcast.js" },
   "scripts": {
     "broadcast": "node bin/broadcast.js --to recipients.txt --message-file message.txt",
-    "check": "node bin/broadcast.js --to recipients.txt --check",
     "preview": "node bin/broadcast.js --to recipients.txt --message-file message.txt --dry-run"
   },
   "license": "MIT",
@@ -16,5 +15,5 @@
     "iconv-lite": "^0.6.3"
   },
   "engines": { "node": ">=18.0.0" },
-  "os": ["win32", "darwin"]
+  "os": ["win32"]
 }

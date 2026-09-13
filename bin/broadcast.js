@@ -24,18 +24,12 @@
 //                          (default 6-12). Do not go much lower: rapid identical
 //                          messages are what LINE's spam filter looks for.
 //   --dry-run              print the plan (recipients + rendered message), send nothing.
-//   --check                resolve every recipient against the live LINE chat list
-//                          without sending (macOS: non-hijacking AX lookup + header
-//                          read-back; Windows: cannot verify, says so). Run this
-//                          after editing recipients.txt to catch bad names up front.
 //   --yes                  skip the confirmation prompt.
 //   --manual-first         first recipient is sent in manual mode (message pasted,
 //                          Enter NOT pressed) so the operator can check the right
 //                          chat opened; the loop resumes after they press Enter here.
 //                          Strongly recommended on a machine's first run.
 //   --resume <report.json> skip recipients already marked "sent" in a previous report.
-//   --allow-unverified     macOS only: send even when the opened chat's header
-//                          could not be read back (default: abort that recipient).
 //   --max-failures <n>     stop the whole run after n consecutive failures (default 3),
 //                          since that usually means LINE lost its window, not one bad name.
 //   -h, --help
@@ -64,11 +58,9 @@ function parseArgs(argv) {
     delayMin: 6,
     delayMax: 12,
     dryRun: false,
-    check: false,
     yes: false,
     manualFirst: false,
     resume: null,
-    allowUnverified: false,
     maxFailures: 3,
     help: false,
   };
@@ -89,11 +81,9 @@ function parseArgs(argv) {
       cfg.delayMax = m[2] ? parseFloat(m[2]) : cfg.delayMin;
       if (cfg.delayMax < cfg.delayMin) [cfg.delayMin, cfg.delayMax] = [cfg.delayMax, cfg.delayMin];
     } else if (a === '--dry-run') cfg.dryRun = true;
-    else if (a === '--check') cfg.check = true;
     else if (a === '--yes' || a === '-y') cfg.yes = true;
     else if (a === '--manual-first') cfg.manualFirst = true;
     else if (a === '--resume') cfg.resume = next();
-    else if (a === '--allow-unverified') cfg.allowUnverified = true;
     else if (a === '--max-failures') cfg.maxFailures = parseInt(next(), 10);
     else if (a === '-h' || a === '--help') cfg.help = true;
     else throw new Error(`不認得的參數：${a}（用 --help 看用法）`);
@@ -107,7 +97,6 @@ const HELP = `LINE 群發（逐一發送到多個聊天室）
 用法:
   node bin/broadcast.js --to recipients.txt --message-file message.txt [選項]
   node bin/broadcast.js --to recipients.txt --message "今日颱風休館" [選項]
-  node bin/broadcast.js --to recipients.txt --check
 
 選項:
   --to <檔案>            收件人清單，一行一個 LINE 聊天室名稱（# 開頭為註解，重複只發一次）
@@ -116,13 +105,10 @@ const HELP = `LINE 群發（逐一發送到多個聊天室）
   --message-file <檔案>  從 UTF-8 檔案讀訊息（可多行）；{name} 會換成稱呼
   --delay <最小-最大>     每位之間隨機等待秒數（預設 6-12；太快容易被 LINE 判定為垃圾訊息）
   --dry-run              只列出計畫，不發送
-  --check                對照 LINE 目前的聊天列表逐一確認名字找得到（不發送、不打字）
-                         macOS 可完整驗證；Windows 無法事先驗證，會直接告知
   --yes, -y              不詢問直接開始
   --manual-first         第一位用「手動模式」：貼好訊息但不按 Enter，讓你確認開到對的人，
                          在 LINE 按送出後回到這裡按 Enter 繼續（新機器第一次強烈建議）
   --resume <報告.json>   略過上次報告中已標記 sent 的收件人
-  --allow-unverified     macOS：讀不到聊天室標題時仍發送（預設中止該位）
   --max-failures <n>     連續失敗 n 位就整批停止（預設 3）
   -h, --help
 
@@ -174,45 +160,6 @@ function fmt(r) {
   return r.label !== r.chat ? `${r.chat}（稱呼：${r.label}）` : r.chat;
 }
 
-// --------------------------------------------------------------- check ----
-
-async function runCheck(line, queue, log) {
-  if (!line.canVerify) {
-    log.warn('Windows 版無法事先對照聊天列表（LINE 搜尋框沒有回傳結果的管道）。');
-    console.log('請改用：1) 先 --dry-run 看名單有沒有打錯  2) 正式發送時加 --manual-first 人眼確認第一位');
-    console.log('        3) 名字務必跟 LINE 列表顯示的一字不差（可在 LINE 裡把客戶改成好認的顯示名稱）');
-    return 0;
-  }
-  if (!(await line.isLineRunning())) {
-    log.error('LINE 未啟動：請先開啟並登入 LINE 桌面版，再重新執行。');
-    return 1;
-  }
-  let bad = 0;
-  for (let i = 0; i < queue.length; i++) {
-    const r = queue[i];
-    try {
-      const res = await line.resolveChat(r.chat);
-      if (!res.matched) {
-        bad++;
-        log.error(`✗ (${i + 1}/${queue.length}) 找不到「${r.chat}」`, res.seen.length ? `列表可見：${res.seen.slice(0, 8).join('、')}` : '');
-      } else if (res.verified === 'mismatch') {
-        bad++;
-        log.error(`✗ (${i + 1}/${queue.length}) 「${r.chat}」點開後標題是「${res.header}」，不符（可能名字只是別人名字的一部分）`);
-      } else if (res.verified === 'unknown') {
-        log.warn(`? (${i + 1}/${queue.length}) 「${r.chat}」找得到，但讀不到標題無法確認（發送時需 --allow-unverified）`);
-      } else {
-        log.info(`✓ (${i + 1}/${queue.length}) 「${r.chat}」`);
-      }
-    } catch (e) {
-      bad++;
-      log.error(`✗ (${i + 1}/${queue.length}) 「${r.chat}」檢查失敗：${e?.message || e}`);
-    }
-  }
-  console.log('');
-  console.log(bad ? `有 ${bad} 位名字對不上，請修正 recipients.txt 後再發送。` : `全部 ${queue.length} 位都找得到。`);
-  return bad ? 1 : 0;
-}
-
 // ---------------------------------------------------------------- main ----
 
 async function main() {
@@ -233,7 +180,7 @@ async function main() {
     console.error(HELP);
     process.exit(2);
   }
-  if (!cfg.check && !cfg.message && !cfg.messageFile) {
+  if (!cfg.message && !cfg.messageFile) {
     console.error('缺少 --message 或 --message-file');
     console.error(HELP);
     process.exit(2);
@@ -256,10 +203,6 @@ async function main() {
     process.exit(2);
   }
 
-  if (cfg.check) {
-    console.log(`對照 ${recipients.length} 位收件人…`);
-    process.exit(await runCheck(new LineAutomation(), recipients, log));
-  }
 
   let template = cfg.message;
   if (cfg.messageFile) {
@@ -298,7 +241,7 @@ async function main() {
   console.log(render(template, queue[0]?.label || '{name}'));
   console.log('----------------------------------------');
   console.log(`每位間隔：${cfg.delayMin}~${cfg.delayMax} 秒，預估總時間約 ${Math.ceil((queue.length * (cfg.delayMin + cfg.delayMax)) / 2 / 60)} 分鐘`);
-  console.log(`平台：${process.platform}${cfg.manualFirst ? '，第一位手動確認' : ''}`);
+  if (cfg.manualFirst) console.log('第一位手動確認');
   console.log(`紀錄：${log.file}`);
   console.log('');
 
@@ -313,16 +256,20 @@ async function main() {
 
   // Preflight: LINE must be running before we ask for confirmation, so the
   // operator gets the "open LINE first" message immediately.
-  const line = new LineAutomation();
+  let line;
+  try {
+    line = new LineAutomation();
+  } catch (e) {
+    log.error(e.message);
+    process.exit(1);
+  }
   if (!(await line.isLineRunning())) {
     log.error('LINE 未啟動：請先開啟並登入 LINE 桌面版，再重新執行。');
     process.exit(1);
   }
-  if (process.platform === 'win32') {
-    log.info(`AutoHotkey 路徑：${line.automation.ahkPath}`);
-    if (!cfg.manualFirst) {
-      log.warn('Windows 版無法確認開到的聊天室是否正確；名字打錯會貼進目前開著的聊天室。新名單建議加 --manual-first。');
-    }
+  log.info(`AutoHotkey 路徑：${line.automation.ahkPath}`);
+  if (!cfg.manualFirst) {
+    log.warn('工具無法確認開到的聊天室是否正確；名字打錯會貼進目前開著的聊天室。新名單建議加 --manual-first。');
   }
 
   if (!cfg.yes) {
@@ -379,9 +326,7 @@ async function main() {
     for (let attempt = 1; attempt <= 2 && entry.status === 'pending'; attempt++) {
       entry.attempts = attempt;
       try {
-        const r = await line.sendChatMessage(chat, message, !manual, {
-          requireVerified: !cfg.allowUnverified,
-        });
+        const r = await line.sendChatMessage(chat, message, !manual);
         if (r.success) {
           entry.status = manual ? 'sent-manual' : 'sent';
           entry.at = new Date().toISOString();
