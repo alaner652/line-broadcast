@@ -169,9 +169,9 @@ ${script}
       Sleep ${this.delayMid}
       Send "{Enter}"
       Sleep ${this.delayShort}
-      clickX := winX + 200 * scale
-      clickY := winY + 140 * scale
-      Click clickX, clickY
+      ; Space opens the highlighted (first) search result. Keyboard instead of a
+      ; coordinate click so DPI scaling / window layout cannot send it elsewhere.
+      Send "{Space}"
       Sleep ${this.delayMid}
       Return
     `;
