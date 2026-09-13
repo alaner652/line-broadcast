@@ -2,6 +2,7 @@ node_modules/
 
 # operator data + logs (real customer names — never commit)
 recipients.txt
+recipients.draft.txt
 message.txt
 logs/
 

@@ -6,7 +6,8 @@
   "bin": { "line-broadcast": "./bin/broadcast.js" },
   "scripts": {
     "broadcast": "node bin/broadcast.js --to recipients.txt --message-file message.txt",
-    "preview": "node bin/broadcast.js --to recipients.txt --message-file message.txt --dry-run"
+    "preview": "node bin/broadcast.js --to recipients.txt --message-file message.txt --dry-run",
+    "scan": "node bin/scan-chats.js"
   },
   "license": "MIT",
   "private": true,
