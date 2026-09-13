@@ -167,11 +167,14 @@ ${script}
       Sleep ${this.delayShort}
       Send "^v" ; Paste chat name
       Sleep ${this.delayMid}
+      ; Enter alone opens the top (and, for an exact name, only) search result
+      ; and moves focus into the opened chat. A prior version also sent Space
+      ; afterward assuming Enter only highlighted the result; on current LINE
+      ; for Windows that extra Space lands after focus has already moved into
+      ; the chat and has been observed to misfire (typed into whatever field
+      ; still had focus, or collapsing the window into its compact flyout and
+      ; switching to an unrelated chat) - so it was removed.
       Send "{Enter}"
-      Sleep ${this.delayShort}
-      ; Space opens the highlighted (first) search result. Keyboard instead of a
-      ; coordinate click so DPI scaling / window layout cannot send it elsewhere.
-      Send "{Space}"
       Sleep ${this.delayMid}
       Return
     `;
