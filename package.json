@@ -1,0 +1,20 @@
+{
+  "name": "line-broadcast",
+  "version": "0.1.0",
+  "description": "把一則訊息逐一發送給多位 LINE 好友（LINE 桌面版 GUI 自動化），附報告、補發與 log",
+  "type": "module",
+  "bin": { "line-broadcast": "./bin/broadcast.js" },
+  "scripts": {
+    "broadcast": "node bin/broadcast.js --to recipients.txt --message-file message.txt",
+    "check": "node bin/broadcast.js --to recipients.txt --check",
+    "preview": "node bin/broadcast.js --to recipients.txt --message-file message.txt --dry-run"
+  },
+  "license": "MIT",
+  "private": true,
+  "dependencies": {
+    "chardet": "^2.1.0",
+    "iconv-lite": "^0.6.3"
+  },
+  "engines": { "node": ">=18.0.0" },
+  "os": ["win32", "darwin"]
+}

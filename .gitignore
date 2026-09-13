@@ -1,0 +1,8 @@
+node_modules/
+
+# operator data + logs (real customer names — never commit)
+recipients.txt
+message.txt
+logs/
+
+.DS_Store
