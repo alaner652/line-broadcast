@@ -41,6 +41,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { LineAutomation } from '../src/automation/index.js';
@@ -123,9 +124,57 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const randBetween = (a, b) => a + Math.random() * (b - a);
 const stripBom = (s) => s.replace(/^\uFEFF/, '');
 
+/**
+ * Read a text file the way an operator's editor might have saved it: UTF-8
+ * (with or without BOM) or UTF-16 LE/BE (Windows Notepad's "Unicode" option).
+ */
+function readText(file) {
+  const buf = fs.readFileSync(file);
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString('utf16le');
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) return buf.subarray(2).swap16().toString('utf16le');
+  return stripBom(buf.toString('utf8'));
+}
+
+/**
+ * Find an operator input file, tolerating the two ways it usually goes missing
+ * on a fresh Windows machine:
+ *  - the repo ships only examples/ (real names are git-ignored), so on first
+ *    run the file does not exist yet → create it from the example and tell
+ *    the operator to fill it in;
+ *  - Notepad hides extensions, so "recipients.txt" was saved as
+ *    "recipients.txt.txt" → use that one and say so.
+ * @returns {{path:string, created:boolean, note?:string}}
+ */
+function locateInput(rel, exampleRel) {
+  const abs = path.resolve(ROOT, rel);
+  if (fs.existsSync(abs)) return { path: abs, created: false };
+  const doubled = abs + '.txt';
+  if (fs.existsSync(doubled)) {
+    return { path: doubled, created: false, note: `找不到 ${rel}，但有 ${path.basename(doubled)}（記事本存檔時多了一個 .txt），先用它。` };
+  }
+  const example = exampleRel ? path.resolve(ROOT, exampleRel) : null;
+  if (example && fs.existsSync(example)) {
+    fs.copyFileSync(example, abs);
+    return { path: abs, created: true };
+  }
+  const err = new Error(`找不到 ${rel}（也沒有 ${path.basename(doubled)}）。請在專案資料夾 ${ROOT} 建立這個檔案。`);
+  err.code = 'ENOENT';
+  throw err;
+}
+
+/** Open a file in the OS default editor so the operator can fill it in (best effort). */
+function openInEditor(file) {
+  try {
+    const cmd = process.platform === 'win32' ? 'notepad' : 'open';
+    spawn(cmd, [file], { detached: true, stdio: 'ignore' }).unref();
+  } catch {
+    // Not fatal: the message already tells them which file to edit.
+  }
+}
+
 /** @returns {{chat:string, label:string}[]} chat = LINE display name, label = what {name} renders to */
 function readRecipients(file) {
-  const raw = stripBom(fs.readFileSync(file, 'utf8'));
+  const raw = readText(file);
   const seen = new Set();
   const out = [];
   for (const line of raw.split(/\r?\n/)) {
@@ -191,27 +240,33 @@ async function main() {
   const reportPath = path.join(LOG_DIR, `broadcast-report-${runId}.json`);
 
   // Inputs. Fail loudly before touching LINE.
+  // First run on a fresh machine: recipients.txt / message.txt are git-ignored
+  // (real customer names), so create them from the examples, open them for
+  // editing, and stop — never send the example content.
   let recipients;
+  let template = cfg.message;
   try {
-    recipients = readRecipients(path.resolve(ROOT, cfg.to));
+    const rc = locateInput(cfg.to, 'examples/recipients.example.txt');
+    const mf = cfg.messageFile ? locateInput(cfg.messageFile, 'examples/message.example.txt') : null;
+    if (rc.created || (mf && mf.created)) {
+      const made = [rc.created && cfg.to, mf && mf.created && cfg.messageFile].filter(Boolean);
+      log.warn(`第一次執行：已從範本建立 ${made.join('、')}。`);
+      console.log('\n請在剛打開的記事本裡填入真實的客戶 LINE 名稱與訊息內容，存檔後再執行一次。\n');
+      for (const f of made) openInEditor(path.resolve(ROOT, f));
+      process.exit(2);
+    }
+    if (rc.note) log.warn(rc.note);
+    if (mf && mf.note) log.warn(mf.note);
+    recipients = readRecipients(rc.path);
+    if (mf) template = readText(mf.path).replace(/\r\n/g, '\n');
   } catch (e) {
-    log.error(`讀取收件人檔案失敗：${cfg.to}`, e.message);
+    log.error(`讀取收件人 / 訊息檔案失敗：${e.message}`);
+    console.error(`\n檔案要放在這個資料夾：${ROOT}\n（如果是用記事本建立的，檢查有沒有變成 recipients.txt.txt）\n`);
     process.exit(2);
   }
   if (recipients.length === 0) {
-    log.error(`收件人清單為空：${cfg.to}`);
+    log.error(`收件人清單為空：${cfg.to}（開頭是 # 的行不算）`);
     process.exit(2);
-  }
-
-
-  let template = cfg.message;
-  if (cfg.messageFile) {
-    try {
-      template = stripBom(fs.readFileSync(path.resolve(ROOT, cfg.messageFile), 'utf8')).replace(/\r\n/g, '\n');
-    } catch (e) {
-      log.error(`讀取訊息檔案失敗：${cfg.messageFile}`, e.message);
-      process.exit(2);
-    }
   }
   template = template.replace(/\s+$/, '');
   if (!template) {
